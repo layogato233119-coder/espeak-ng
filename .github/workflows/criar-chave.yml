@@ -1,36 +1,45 @@
-name: Criar chave de assinatura (so em repositorio PRIVADO)
+name: Criar chave de assinatura permanente (uma unica vez)
 
 on:
   workflow_dispatch:
-    inputs:
-      senha:
-        description: 'Senha da chave (6 ou mais caracteres, sem espacos)'
-        required: true
+
+permissions:
+  contents: write
 
 jobs:
   chave:
     runs-on: ubuntu-latest
     steps:
-      - name: Conferir que o repositorio e privado
+      - uses: actions/checkout@v4
+
+      - name: Conferir a senha e que ainda nao existe chave
+        env:
+          SENHA: ${{ secrets.SENHA_CHAVE }}
         run: |
-          if [ "${{ github.event.repository.private }}" != "true" ]; then
-            echo "::error::Este repositorio e publico. A chave ficaria exposta. Use um repositorio privado."
+          if [ -z "$SENHA" ]; then
+            echo "::error::Falta o segredo SENHA_CHAVE. Crie-o em Settings, Secrets and variables, Actions."
             exit 1
           fi
-      - name: Gerar a chave
+          if [ ${#SENHA} -lt 12 ]; then
+            echo "::error::A senha do segredo SENHA_CHAVE precisa ter 12 ou mais caracteres, sem espacos."
+            exit 1
+          fi
+          if [ -f chave.enc ]; then
+            echo "::error::O arquivo chave.enc ja existe. Nao crie outra chave: trocar a chave obriga a desinstalar o app."
+            exit 1
+          fi
+
+      - name: Gerar a chave, criptografar e guardar no repositorio
         env:
-          SENHA: ${{ inputs.senha }}
+          SENHA: ${{ secrets.SENHA_CHAVE }}
         run: |
           keytool -genkeypair -keystore chave.jks -storepass "$SENHA" -keypass "$SENHA" \
             -alias diferente -keyalg RSA -keysize 2048 -validity 36500 \
             -dname "CN=Diferente dos Normais, O=Android Todo Tempo, C=BR"
-          base64 -w0 chave.jks > chave.base64.txt
-          printf 'KEYSTORE_PASSWORD=%s\nKEY_ALIAS=diferente\nKEY_PASSWORD=%s\n' "$SENHA" "$SENHA" > dados.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: chave-de-assinatura
-          path: |
-            chave.jks
-            chave.base64.txt
-            dados.txt
-          retention-days: 1
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -in chave.jks -out chave.enc -pass env:SENHA
+          rm -f chave.jks
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add chave.enc
+          git commit -m "Adicionar chave de assinatura criptografada"
+          git push

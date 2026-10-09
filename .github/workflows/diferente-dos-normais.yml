@@ -64,13 +64,19 @@ jobs:
           KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
           KS_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASS: ${{ secrets.KEY_PASSWORD }}
+          SENHA: ${{ secrets.SENHA_CHAVE }}
         run: |
           cd android
           if [ -n "$KS_B64" ]; then
             echo "$KS_B64" | base64 -d > ks.jks
             printf 'storeFile=ks.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
               "$KS_PASS" "$KS_ALIAS" "$KEY_PASS" > keystore.properties
-            echo "Assinando com a sua chave permanente."
+            echo "Assinando com a sua chave permanente (segredos)."
+          elif [ -f ../chave.enc ] && [ -n "$SENHA" ]; then
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in ../chave.enc -out ks.jks -pass env:SENHA
+            printf 'storeFile=ks.jks\nstorePassword=%s\nkeyAlias=diferente\nkeyPassword=%s\n' \
+              "$SENHA" "$SENHA" > keystore.properties
+            echo "Assinando com a sua chave permanente (chave.enc)."
           else
             echo "::warning::Sem chave permanente: usando uma chave temporaria. O APK instala, mas a proxima versao nao vai atualizar por cima desta. Veja o LEIA-ME."
             keytool -genkeypair -keystore ks.jks -storepass temporaria -keypass temporaria \
