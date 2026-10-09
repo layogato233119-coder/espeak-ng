@@ -1,0 +1,94 @@
+name: Diferente dos Normais - compilar e assinar
+
+on:
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Abrir o pacote de codigo
+        run: |
+          if [ -f atualizacao-codigo.zip ]; then unzip -oq atualizacao-codigo.zip; fi
+
+      - name: Aplicar marca e recursos
+        run: python3 patch/aplicar.py
+
+      - name: Incluir as vozes neurais da pasta vozes/ no app
+        run: |
+          shopt -s nullglob
+          for z in vozes/*.zip; do
+            n=$(basename "$z" .zip); mkdir -p "vozes/$n"; unzip -oq "$z" -d "vozes/$n"
+          done
+          for d in vozes/*/; do
+            n=$(basename "$d"); dest="android/assets/vozes-incluidas/$n"
+            mkdir -p "$dest"
+            parts=( "$d"*.onnx.parte* )
+            if [ ${#parts[@]} -gt 0 ]; then
+              cat $(printf '%s\n' "${parts[@]}" | sort -V) > "$dest/model.onnx"
+            else
+              models=( "$d"*.onnx )
+              if [ ${#models[@]} -gt 0 ]; then cp "${models[0]}" "$dest/model.onnx"; fi
+            fi
+            jsons=( "$d"*.onnx.json )
+            if [ ${#jsons[@]} -eq 0 ]; then jsons=( "$d"*.json ); fi
+            if [ ${#jsons[@]} -gt 0 ]; then cp "${jsons[0]}" "$dest/model.onnx.json"; fi
+            if [ ! -s "$dest/model.onnx" ] || [ ! -s "$dest/model.onnx.json" ]; then
+              echo "::warning::A voz '$n' esta incompleta (falta o .onnx ou o .json) e foi ignorada."
+              rm -rf "$dest"
+            else
+              echo "Voz incluida: $n ($(du -h "$dest/model.onnx" | cut -f1))"
+            fi
+          done
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: 17
+          cache: gradle
+
+      - name: Cache native build (CMake/.cxx)
+        uses: actions/cache@v4
+        with:
+          path: android/.cxx
+          key: cxx-dn-${{ runner.os }}-${{ hashFiles('android/jni/**', 'cmake/**', 'src/**', 'dictsource/**', 'phsource/**') }}
+          restore-keys: cxx-dn-${{ runner.os }}-
+
+      - name: Preparar a chave de assinatura
+        env:
+          KS_B64: ${{ secrets.KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          cd android
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > ks.jks
+            printf 'storeFile=ks.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+              "$KS_PASS" "$KS_ALIAS" "$KEY_PASS" > keystore.properties
+            echo "Assinando com a sua chave permanente."
+          else
+            echo "::warning::Sem chave permanente: usando uma chave temporaria. O APK instala, mas a proxima versao nao vai atualizar por cima desta. Veja o LEIA-ME."
+            keytool -genkeypair -keystore ks.jks -storepass temporaria -keypass temporaria \
+              -alias temporaria -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Diferente dos Normais temporario"
+            printf 'storeFile=ks.jks\nstorePassword=temporaria\nkeyAlias=temporaria\nkeyPassword=temporaria\n' \
+              > keystore.properties
+          fi
+
+      - name: Compilar
+        run: |
+          export DN_VERSION_CODE=$((1000 + ${{ github.run_number }}))
+          echo "versionCode = $DN_VERSION_CODE"
+          cd android && ./gradlew assembleRelease
+
+      - name: Enviar o APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-diferente-dos-normais
+          path: android/build/outputs/apk/release/*.apk
+          retention-days: 14

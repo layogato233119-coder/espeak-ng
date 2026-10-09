@@ -1,0 +1,36 @@
+name: Criar chave de assinatura (so em repositorio PRIVADO)
+
+on:
+  workflow_dispatch:
+    inputs:
+      senha:
+        description: 'Senha da chave (6 ou mais caracteres, sem espacos)'
+        required: true
+
+jobs:
+  chave:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Conferir que o repositorio e privado
+        run: |
+          if [ "${{ github.event.repository.private }}" != "true" ]; then
+            echo "::error::Este repositorio e publico. A chave ficaria exposta. Use um repositorio privado."
+            exit 1
+          fi
+      - name: Gerar a chave
+        env:
+          SENHA: ${{ inputs.senha }}
+        run: |
+          keytool -genkeypair -keystore chave.jks -storepass "$SENHA" -keypass "$SENHA" \
+            -alias diferente -keyalg RSA -keysize 2048 -validity 36500 \
+            -dname "CN=Diferente dos Normais, O=Android Todo Tempo, C=BR"
+          base64 -w0 chave.jks > chave.base64.txt
+          printf 'KEYSTORE_PASSWORD=%s\nKEY_ALIAS=diferente\nKEY_PASSWORD=%s\n' "$SENHA" "$SENHA" > dados.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chave-de-assinatura
+          path: |
+            chave.jks
+            chave.base64.txt
+            dados.txt
+          retention-days: 1
