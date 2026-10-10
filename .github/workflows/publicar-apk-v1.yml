@@ -1,0 +1,55 @@
+name: Publicar APK com link direto
+
+# Depois de cada compilacao bem-sucedida (ou quando voce rodar este fluxo na mao),
+# publica o APK mais recente num endereco fixo:
+# https://github.com/layogato233119-coder/espeak-ng/releases/download/apk-atual/diferente-dos-normais.apk
+on:
+  workflow_run:
+    workflows: ["Diferente dos Normais - compilar e assinar"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publicar:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Achar a compilacao mais recente
+        id: achar
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            ID="${{ github.event.workflow_run.id }}"
+          else
+            ID=$(gh run list --workflow diferente-dos-normais.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+          fi
+          if [ -z "$ID" ] || [ "$ID" = "null" ]; then
+            echo "Nenhuma compilacao bem-sucedida encontrada."; exit 1
+          fi
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+
+      - name: Baixar o APK da compilacao
+        run: |
+          mkdir -p saida
+          gh run download "${{ steps.achar.outputs.id }}" -n apk-diferente-dos-normais -D saida
+          ls -l saida
+          APK=$(ls saida/*.apk | head -1)
+          cp "$APK" diferente-dos-normais.apk
+          ls -l diferente-dos-normais.apk
+
+      - name: Publicar no endereco fixo
+        run: |
+          ID="${{ steps.achar.outputs.id }}"
+          SHA=$(gh run view "$ID" --json headSha --jq .headSha)
+          NUM=$(gh run view "$ID" --json number --jq .number)
+          gh release delete apk-atual --cleanup-tag --yes || true
+          gh release create apk-atual diferente-dos-normais.apk \
+            --target "$SHA" \
+            --title "APK atual" \
+            --notes "Compilacao numero $NUM, versao do codigo ${SHA:0:7}. Arquivo: diferente-dos-normais.apk"
