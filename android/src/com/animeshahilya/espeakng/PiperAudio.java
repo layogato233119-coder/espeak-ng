@@ -7,9 +7,6 @@
  * (at your option) any later version.
  */
 
-// ARQUIVO COMPLETO. Substitua TODO o conteúdo de
-// android/src/com/animeshahilya/espeakng/PiperAudio.java por este texto.
-//
 // NOVIDADE: limpeza digital da voz (método limpar, chamado no fim de process).
 // Corta os agudos acima de 6 kHz em 8 dB e abaixa o chiado nas pausas.
 // Vale para todas as vozes naturais. Para desligar, mude limpezaDigital para false.
@@ -101,7 +98,7 @@ final class PiperAudio {
             a2 = ((a + 1) - (a - 1) * cos - s) / a0;
         }
 
-        /** Devolve a cópia filtrada; a entrada continua como está. */
+        /** The filtered copy; the input (possibly the phrase cache's) stays as it is. */
         float[] apply(float[] in) {
             final float[] out = new float[in.length];
             for (int i = 0; i < in.length; i++) {
